@@ -3,7 +3,7 @@ import psutil
 from zeroconf import ServiceInfo, ServiceBrowser, Zeroconf
 import socket
 import threading
-from state import log, last_clipboard, broadcast, peers_lock, peers, HANDSHAKE, PORT
+from state import log, last_clipboard, broadcast, peers_lock, peers, HANDSHAKE, PORT, update_tray
 from clipboard import watch_clipboard
 
 def receive_loop(conn: socket.socket) -> None:
@@ -40,6 +40,8 @@ def receive_loop(conn: socket.socket) -> None:
             peers.remove(conn)
     conn.close()
     log("Peer disconnected")
+    with peers_lock:
+        update_tray("server", f"ClipboardSync: сервер, {len(peers)} клиента")
 
 def handle_incoming(conn: socket.socket, addr) -> None:
     conn.settimeout(2)
@@ -55,6 +57,7 @@ def handle_incoming(conn: socket.socket, addr) -> None:
     log(f"Client connected: {addr}")
     with peers_lock:
         peers.append(conn)
+        update_tray("server", f"ClipboardSync: сервер, {len(peers)} клиента")
     receive_loop(conn)
 
 def run_as_server() -> None:
@@ -67,11 +70,16 @@ def run_as_server() -> None:
         return ips
 
     ips = get_all_ips()
-    info = ServiceInfo("_clipboard._tcp.local.","ClipboardSync._clipboard._tcp.local.",
-                       addresses=[socket.inet_aton(ip) for ip in ips], port=PORT)
+    info = ServiceInfo(
+        "_clipboard._tcp.local.",
+        "ClipboardSync._clipboard._tcp.local.",
+        addresses=[socket.inet_aton(ip) for ip in ips],
+        port=PORT
+    )
     zc = Zeroconf()
     zc.register_service(info)
     log(f"Service registered on {ips}")
+    update_tray("server", "ClipboardSync: сервер, ожидание клиентов")
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("0.0.0.0", PORT))
@@ -84,11 +92,13 @@ def run_as_server() -> None:
 
 def run_as_client(ip: str) -> None:
     log(f"Connecting to server at {ip}")
+    update_tray("client", f"ClipboardSync: подключение к {ip}...")
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client.connect((ip, PORT))
     client.sendall(HANDSHAKE)
     with peers_lock:
         peers.append(client)
+    update_tray("client", f"ClipboardSync: клиент → {ip}")
     threading.Thread(target=receive_loop, args=(client,), daemon=True).start()
     watch_clipboard()
 
