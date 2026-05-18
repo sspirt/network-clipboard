@@ -1,6 +1,6 @@
 import pyperclip
 import psutil
-from zeroconf import ServiceInfo, ServiceBrowser, Zeroconf
+from zeroconf import ServiceInfo, ServiceBrowser, Zeroconf, NonUniqueNameException
 import socket
 import threading
 from state import log, last_clipboard, broadcast, peers_lock, peers, HANDSHAKE, PORT, update_tray, notify
@@ -81,7 +81,12 @@ def run_as_server() -> None:
         port=PORT
     )
     zc = Zeroconf()
-    zc.register_service(info)
+    try:
+        zc.register_service(info)
+    except NonUniqueNameException:
+        log("Server already running, restarting...")
+        zc.close()
+        return
     log(f"Service registered on {ips}")
     notify("Сервер", f"Сервер запущен на {', '.join(ips)}")
     update_tray("server", "Сервер, ожидание клиентов")
