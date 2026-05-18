@@ -3,7 +3,7 @@ import psutil
 from zeroconf import ServiceInfo, ServiceBrowser, Zeroconf
 import socket
 import threading
-from state import log, last_clipboard, broadcast, peers_lock, peers, HANDSHAKE, PORT, update_tray
+from state import log, last_clipboard, broadcast, peers_lock, peers, HANDSHAKE, PORT, update_tray, notify
 from clipboard import watch_clipboard
 
 def receive_loop(conn: socket.socket) -> None:
@@ -41,7 +41,9 @@ def receive_loop(conn: socket.socket) -> None:
     conn.close()
     log("Peer disconnected")
     with peers_lock:
-        update_tray("server", f"ClipboardSync: сервер, {len(peers)} клиента")
+        peers_count = len(peers)
+        update_tray("server", f"Сервер, {peers_count} в сети")
+    notify("Сервер", f"Клиент отключился, {peers_count} в сети")
 
 def handle_incoming(conn: socket.socket, addr) -> None:
     conn.settimeout(2)
@@ -57,7 +59,9 @@ def handle_incoming(conn: socket.socket, addr) -> None:
     log(f"Client connected: {addr}")
     with peers_lock:
         peers.append(conn)
-        update_tray("server", f"ClipboardSync: сервер, {len(peers)} клиента")
+        peers_count = len(peers)
+    update_tray("server", f"Сервер, {peers_count} в сети")
+    notify("Сервер", f"Подключился клиент {addr[0]} ({peers_count} в сети)")
     receive_loop(conn)
 
 def run_as_server() -> None:
@@ -79,7 +83,8 @@ def run_as_server() -> None:
     zc = Zeroconf()
     zc.register_service(info)
     log(f"Service registered on {ips}")
-    update_tray("server", "ClipboardSync: сервер, ожидание клиентов")
+    notify("Сервер", f"Сервер запущен на {', '.join(ips)}")
+    update_tray("server", "Сервер, ожидание клиентов")
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("0.0.0.0", PORT))
@@ -92,13 +97,14 @@ def run_as_server() -> None:
 
 def run_as_client(ip: str) -> None:
     log(f"Connecting to server at {ip}")
-    update_tray("client", f"ClipboardSync: подключение к {ip}...")
+    update_tray("client", f"Подключение к {ip}...")
     client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     client.connect((ip, PORT))
     client.sendall(HANDSHAKE)
     with peers_lock:
         peers.append(client)
-    update_tray("client", f"ClipboardSync: клиент → {ip}")
+    update_tray("client", f"Клиент → {ip}")
+    notify("Клиент", f"Подключено к {ip}")
     threading.Thread(target=receive_loop, args=(client,), daemon=True).start()
     watch_clipboard()
 

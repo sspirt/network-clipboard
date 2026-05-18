@@ -2,7 +2,7 @@ import os
 import sys
 import pystray
 from PIL import Image, ImageDraw
-import state
+from state import set_tray_icon
 
 def has_display() -> bool:
     if sys.platform in ("win32", "darwin"):
@@ -43,16 +43,12 @@ def create_icon_image(status: str = "searching"):
     return img
 
 def run_tray(on_quit_callback):
-    menu = pystray.Menu(
-        pystray.MenuItem("ClipboardSync", None, enabled=False),
-        pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Выйти", lambda icon, _ : (on_quit_callback(), icon.stop()))
-    )
+    menu = pystray.Menu(pystray.MenuItem("Выйти", lambda icon, _ : (on_quit_callback(), icon.stop())))
     icon = pystray.Icon(
-        name="ClipboardSync",
+        name="Network Clipboard",
         icon=create_icon_image(),
-        title="ClipboardSync: поиск...",
+        title="Поиск...",
         menu=menu
     )
-    state.tray_icon = icon
+    set_tray_icon(icon)
     icon.run()

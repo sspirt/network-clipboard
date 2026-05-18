@@ -1,9 +1,8 @@
 import threading
 import os
-import sys
 from network import find_server, run_as_client, run_as_server
 from tray import run_tray, has_display
-from state import log
+from state import log, set_display_mode
 
 def start_networking() -> None:
     server_ip = find_server()
@@ -18,8 +17,7 @@ def quit_app() -> None:
 
 if __name__ == "__main__":
     if has_display():
-        sys.stdout = open(os.devnull, "w")
-        sys.stderr = open(os.devnull, "w")
+        set_display_mode(True)
         threading.Thread(target=start_networking, daemon=True).start()
         run_tray(on_quit_callback=quit_app)
     else:

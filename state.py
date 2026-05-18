@@ -1,16 +1,26 @@
 import pyperclip
 import socket
 import threading
+from plyer import notification
 
 PORT = 9999
 HANDSHAKE = bytes(b"CLIPSYNV1\n")
 
 peers: list[socket.socket] = []
 peers_lock = threading.Lock()
+display_mode:bool = False
 tray_icon = None
 
 def log(msg: str) -> None:
     print(msg)
+
+def set_tray_icon(icon) -> None:
+    global tray_icon
+    tray_icon = icon
+
+def set_display_mode(val: bool) -> None:
+    global display_mode
+    display_mode = val
 
 def safe_paste() -> str:
     try:
@@ -41,3 +51,14 @@ def update_tray(status: str, tooltip: str) -> None:
         return
     tray_icon.icon = create_icon_image(status)
     tray_icon.title = tooltip
+
+def notify(title: str, message: str) -> None:
+    try:
+        notification.notify(
+            title=title,
+            message=message,
+            app_name="Network Clipboard",
+            timeout=4,
+        )
+    except Exception:
+        pass
