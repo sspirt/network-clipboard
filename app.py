@@ -1,15 +1,20 @@
 import threading
 import os
+import time
 from network import find_server, run_as_client, run_as_server
 from tray import run_tray, has_display
 from state import log, set_display_mode
 
 def start_networking() -> None:
-    server_ip = find_server()
-    if server_ip:
-        run_as_client(server_ip)
-    else:
-        run_as_server()
+    while True:
+        server_ip = find_server()
+        if server_ip:
+            run_as_client(server_ip)
+            log("Restarting...")
+            time.sleep(3)
+        else:
+            run_as_server()
+            time.sleep(3)
 
 def quit_app() -> None:
     log("Quitting...")

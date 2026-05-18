@@ -4,7 +4,7 @@ from zeroconf import ServiceInfo, ServiceBrowser, Zeroconf
 import socket
 import threading
 from state import log, last_clipboard, broadcast, peers_lock, peers, HANDSHAKE, PORT, update_tray, notify
-from clipboard import watch_clipboard
+from clipboard import watch_clipboard, watch_and_send
 
 def receive_loop(conn: socket.socket) -> None:
     buffer = ""
@@ -43,7 +43,7 @@ def receive_loop(conn: socket.socket) -> None:
     with peers_lock:
         peers_count = len(peers)
         update_tray("server", f"Сервер, {peers_count} в сети")
-    notify("Сервер", f"Клиент отключился, {peers_count} в сети")
+    notify("Потеря соединения", f"Клиент отключился, {peers_count} в сети")
 
 def handle_incoming(conn: socket.socket, addr) -> None:
     conn.settimeout(2)
@@ -98,15 +98,29 @@ def run_as_server() -> None:
 def run_as_client(ip: str) -> None:
     log(f"Connecting to server at {ip}")
     update_tray("client", f"Подключение к {ip}...")
-    client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client.connect((ip, PORT))
-    client.sendall(HANDSHAKE)
+    try:
+        client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client.connect((ip, PORT))
+        client.sendall(HANDSHAKE)
+    except OSError as e:
+        log(f"Connection error: {e}")
+        return
     with peers_lock:
         peers.append(client)
     update_tray("client", f"Клиент → {ip}")
     notify("Клиент", f"Подключено к {ip}")
-    threading.Thread(target=receive_loop, args=(client,), daemon=True).start()
-    watch_clipboard()
+    disconnected = threading.Event()
+
+    def receive() -> None:
+        receive_loop(client)
+        disconnected.set()
+
+    t = threading.Thread(target=receive, daemon=True)
+    t.start()
+    watch_and_send(client, disconnected)
+    t.join()
+    log("Disconnected from server")
+    notify("Клиент", "Соединение потеряно")
 
 def find_server() -> str | None:
     host: list[str | None] = [None]
@@ -131,6 +145,7 @@ def find_server() -> str | None:
                     return
 
     log("Searching for server...")
+    update_tray("searching", "Поиск...")
     zc = Zeroconf()
     ServiceBrowser(zc, "_clipboard._tcp.local.", handlers=[on_service_found])
     event.wait(timeout=5)
