@@ -9,6 +9,7 @@ HANDSHAKE = bytes(b"CLIPSYNV1\n")
 last_clipboard_hash: list[str] = [""]
 peers: list[socket.socket] = []
 peers_lock = threading.Lock()
+clipboard_lock = threading.Lock()
 display_mode:bool = False
 tray_icon = None
 

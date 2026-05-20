@@ -6,7 +6,7 @@ import io
 import zipfile
 import tempfile
 from pathlib import Path
-from state import last_clipboard_hash, broadcast, peers, log, make_message, hash_data, peers_lock
+from state import last_clipboard_hash, broadcast, peers, log, make_message, hash_data, peers_lock, clipboard_lock
 
 temp_dir: Path | None = None
 last_unpacked_paths: set[str] = set()
@@ -16,7 +16,6 @@ def get_temp_dir() -> Path | None:
     if temp_dir is None:
         temp_dir = Path(tempfile.mkdtemp(prefix="netclip_"))
     return temp_dir
-
 
 def pack_files(paths: list[str]) -> bytes:
     buffer = io.BytesIO()
@@ -62,11 +61,12 @@ def read_clipboard() -> tuple[str, bytes] | None:
     reader = readers.get(sys.platform)
     if not reader:
         return None
-    try:
-        return reader()
-    except Exception as e:
-        log(f"read_clipboard error: {e}")
-        return None
+    with clipboard_lock:
+        try:
+            return reader()
+        except Exception as e:
+            log(f"read_clipboard error: {e}")
+            return None
 
 def read_macos() -> tuple[str, bytes] | None:
     AppKit = importlib.import_module("AppKit")
@@ -76,8 +76,7 @@ def read_macos() -> tuple[str, bytes] | None:
         paths = list(files)
         if is_our_unpacked(paths):
             return None
-        data = pack_files(paths)
-        return "file", data
+        return "file", "\n".join(paths).encode("utf-8")
     png = pb.dataForType_(AppKit.NSPasteboardTypePNG)
     if png:
         return "image", bytes(png)
@@ -105,8 +104,7 @@ def read_windows() -> tuple[str, bytes] | None:
             paths = list(win32clipboard.GetClipboardData(CF_HDROP))
             if is_our_unpacked(paths):
                 return None
-            data = pack_files(paths)
-            return "file", data
+            return "file", "\n".join(paths).encode("utf-8")
         if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_DIB):
             try:
                 dib = win32clipboard.GetClipboardData(win32clipboard.CF_DIB)
@@ -139,7 +137,7 @@ def read_linux() -> tuple[str, bytes] | None:
         if paths:
             if is_our_unpacked(paths):
                 return None
-            return "file", pack_files(paths)
+            return "file", "\n".join(paths).encode("utf-8")
     result = subprocess.run(["xclip", "-selection", "clipboard", "-t", "image/png", "-o"],
                             capture_output=True)
     if result.returncode == 0 and result.stdout:
@@ -158,10 +156,11 @@ def write_clipboard(msg_type: str, data: bytes) -> None:
     writer = writers.get(sys.platform)
     if not writer:
         return
-    try:
-        writer(msg_type, data)
-    except Exception as e:
-        log(f"write_clipboard error: {e}")
+    with clipboard_lock:
+        try:
+            writer(msg_type, data)
+        except Exception as e:
+            log(f"write_clipboard error: {e}")
 
 def write_macos(msg_type: str, data: bytes) -> None:
     AppKit = importlib.import_module("AppKit")
@@ -233,7 +232,13 @@ def watch_clipboard() -> None:
                 clipboard_hash = hash_data(data)
                 if clipboard_hash != last_clipboard_hash[0]:
                     last_clipboard_hash[0] = clipboard_hash
-                    broadcast(msg_type, data)
+                    if msg_type == "file":
+                        log("Detected new files, packing...")
+                        paths = data.decode("utf-8").split("\n")
+                        send_data = pack_files(paths)
+                    else:
+                        send_data = data
+                    broadcast(msg_type, send_data)
                     with peers_lock:
                         log(f"Sent {msg_type} to {len(peers)} peer(s)")
             time.sleep(0.5)
@@ -251,7 +256,13 @@ def watch_and_send(conn, stop_event: threading.Event | None = None) -> None:
                 clipboard_hash = hash_data(data)
                 if clipboard_hash != last_clipboard_hash[0]:
                     last_clipboard_hash[0] = clipboard_hash
-                    conn.sendall(make_message(msg_type, data))
+                    if msg_type == "file":
+                        log("Detected new files, packing...")
+                        paths = data.decode("utf-8").split("\n")
+                        send_data = pack_files(paths)
+                    else:
+                        send_data = data
+                    conn.sendall(make_message(msg_type, send_data))
                     log(f"Sent {msg_type}")
             time.sleep(0.5)
         except Exception as e:

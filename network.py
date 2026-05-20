@@ -7,9 +7,10 @@ from clipboard import watch_clipboard, watch_and_send, write_clipboard
 
 def receive_loop(conn: socket.socket) -> None:
     buffer = b""
+    BUFF_SIZE = 262144
     while True:
         try:
-            data = conn.recv(4096)
+            data = conn.recv(BUFF_SIZE)
             if not data:
                 break
             buffer += data
@@ -20,18 +21,20 @@ def receive_loop(conn: socket.socket) -> None:
                 msg_type = buffer[:nl].decode()
                 buffer = buffer[nl + 1:]
                 if b"\n" not in buffer:
-                    chunk = conn.recv(4096)
+                    chunk = conn.recv(BUFF_SIZE)
                     if not chunk:
-                        return
+                        break
                     buffer += chunk
                 nl = buffer.index(b"\n")
                 length = int(buffer[:nl].decode())
                 buffer = buffer[nl + 1:]
                 while len(buffer) < length:
-                    chunk = conn.recv(4096)
+                    chunk = conn.recv(BUFF_SIZE)
                     if not chunk:
-                        return
+                        break
                     buffer += chunk
+                if len(buffer) < length:
+                    break
                 payload = buffer[:length]
                 buffer = buffer[length:]
                 last_clipboard_hash[0] = hash_data(payload)
