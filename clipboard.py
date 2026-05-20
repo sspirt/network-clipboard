@@ -2,7 +2,37 @@ import sys
 import importlib
 import threading
 import time
+import io
+import zipfile
+import tempfile
+from pathlib import Path
 from state import last_clipboard_hash, broadcast, peers, log, make_message, hash_data, peers_lock
+
+def get_temp_dir() -> Path:
+    return Path(tempfile.mkdtemp(prefix="netclip_"))
+
+def pack_files(paths: list[str]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for path in paths:
+            p = Path(path)
+            if p.is_dir():
+                for file in p.rglob("*"):
+                    if file.is_file():
+                        zf.write(file, p.name / file.relative_to(p))
+            elif p.is_file():
+                zf.write(p, p.name)
+    return buffer.getvalue()
+
+def unpack_files(data: bytes) -> list[str]:
+    receive_dir = get_temp_dir()
+    extracted = set()
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        for member in zf.namelist():
+            zf.extract(member, receive_dir)
+            root = member.split("/")[0]
+            extracted.add(str(receive_dir / root))
+    return list(extracted)
 
 def read_clipboard() -> tuple[str, bytes] | None:
     readers = {
@@ -25,7 +55,13 @@ def read_macos() -> tuple[str, bytes] | None:
     NSPasteboard = AppKit.NSPasteboard
     NSPasteboardTypeString = AppKit.NSPasteboardTypeString
     NSPasteboardTypePNG = AppKit.NSPasteboardTypePNG
+    NSFilenamesPboardType = AppKit.NSFilenamesPboardType
     pb = NSPasteboard.generalPasteboard()
+    files = pb.propertyListForType_(NSFilenamesPboardType)
+    if files:
+        paths = list(files)
+        data = pack_files(paths)
+        return "file", data
     png = pb.dataForType_(NSPasteboardTypePNG)
     if png:
         return "image", bytes(png)
@@ -35,9 +71,9 @@ def read_macos() -> tuple[str, bytes] | None:
     return None
 
 def read_windows() -> tuple[str, bytes] | None:
-    import io
     from PIL import Image
     win32clipboard = importlib.import_module("win32clipboard")
+    CF_HDROP = 15
     opened = False
     for attempt in range(10):
         try:
@@ -51,6 +87,10 @@ def read_windows() -> tuple[str, bytes] | None:
         log("read_windows error: could not open clipboard")
         return None
     try:
+        if win32clipboard.IsClipboardFormatAvailable(CF_HDROP):
+            paths = list(win32clipboard.GetClipboardData(CF_HDROP))
+            data = pack_files(paths)
+            return "file", data
         if win32clipboard.IsClipboardFormatAvailable(win32clipboard.CF_DIB):
             dib = win32clipboard.GetClipboardData(win32clipboard.CF_DIB)
             bmp_header = (b"BM" + (len(dib) + 14).to_bytes(4, "little") +
@@ -71,6 +111,18 @@ def read_windows() -> tuple[str, bytes] | None:
 
 def read_linux() -> tuple[str, bytes] | None:
     import subprocess
+    from urllib.parse import unquote, urlparse
+    result = subprocess.run(["xclip", "-selection", "clipboard", "-t", "text/uri-list", "-o"],
+                            capture_output=True)
+    if result.returncode == 0 and result.stdout:
+        uris = result.stdout.decode().strip().splitlines()
+        paths = []
+        for uri in uris:
+            uri = uri.strip()
+            if uri.startswith("file://"):
+                paths.append(unquote(urlparse(uri).path))
+        if paths:
+            return "file", pack_files(paths)
     result = subprocess.run(["xclip", "-selection", "clipboard", "-t", "image/png", "-o"],
                             capture_output=True)
     if result.returncode == 0 and result.stdout:
@@ -101,19 +153,24 @@ def write_macos(msg_type: str, data: bytes) -> None:
     NSPasteboard = AppKit.NSPasteboard
     NSPasteboardTypeString = AppKit.NSPasteboardTypeString
     NSPasteboardTypePNG = AppKit.NSPasteboardTypePNG
+    NSFilenamesPboardType = AppKit.NSFilenamesPboardType
     Foundation = importlib.import_module("Foundation")
     NSData = Foundation.NSData
     pb = NSPasteboard.generalPasteboard()
     pb.clearContents()
-    if msg_type == "image":
+    if msg_type == "file":
+        paths = unpack_files(data)
+        pb.setPropertyList_forType_(paths, NSFilenamesPboardType)
+    elif msg_type == "image":
         pb.setData_forType_(NSData.dataWithBytes_length_(data, len(data)), NSPasteboardTypePNG)
     elif msg_type == "text":
         pb.setString_forType_(data.decode("utf-8"), NSPasteboardTypeString)
 
 def write_windows(msg_type: str, data: bytes) -> None:
-    import io
+    import struct
     from PIL import Image
     win32clipboard = importlib.import_module("win32clipboard")
+    CF_HDROP = 15
     opened = False
     for attempt in range(10):
         try:
@@ -128,7 +185,13 @@ def write_windows(msg_type: str, data: bytes) -> None:
         return
     try:
         win32clipboard.EmptyClipboard()
-        if msg_type == "image":
+        if msg_type == "file":
+            paths = unpack_files(data)
+            files_str = "\0".join(paths) + "\0\0"
+            files_bytes = files_str.encode("utf-16-le")
+            dropfiles = struct.pack("IIIII", 20, 0, 0, 0, 1)
+            win32clipboard.SetClipboardData(CF_HDROP, dropfiles + files_bytes)
+        elif msg_type == "image":
             img = Image.open(io.BytesIO(data)).convert("RGB")
             buf = io.BytesIO()
             img.save(buf, format="BMP")
@@ -143,7 +206,15 @@ def write_windows(msg_type: str, data: bytes) -> None:
 
 def write_linux(msg_type: str, data: bytes) -> None:
     import subprocess
-    mime = "image/png" if msg_type == "image" else "text/plain"
+    mimes = {
+        "text": "text/plain",
+        "image": "image/png",
+        "file": "text/uri-list"
+    }
+    mime: str = mimes.get(msg_type, "text/plain")
+    if msg_type == "file":
+        paths = unpack_files(data)
+        data = "\n".join(f"file://{p}" for p in paths).encode()
     subprocess.run(["xclip", "-selection", "clipboard", "-t", mime], input=data, capture_output=True)
 
 def watch_clipboard() -> None:
