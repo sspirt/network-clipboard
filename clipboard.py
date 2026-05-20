@@ -6,7 +6,8 @@ import io
 import zipfile
 import tempfile
 from pathlib import Path
-from state import last_clipboard_hash, broadcast, peers, log, make_message, hash_data, peers_lock, clipboard_lock
+from state import (last_clipboard_hash, broadcast, peers, log, make_message,
+                   hash_data, peers_lock, clipboard_lock, notify)
 
 temp_dir: Path | None = None
 last_unpacked_paths: set[str] = set()
@@ -234,6 +235,7 @@ def watch_clipboard() -> None:
                     last_clipboard_hash[0] = clipboard_hash
                     if msg_type == "file":
                         log("Detected new files, packing...")
+                        notify("Отправка", "Упаковка и отправка файлов...")
                         paths = data.decode("utf-8").split("\n")
                         send_data = pack_files(paths)
                     else:
@@ -241,6 +243,8 @@ def watch_clipboard() -> None:
                     broadcast(msg_type, send_data)
                     with peers_lock:
                         log(f"Sent {msg_type} to {len(peers)} peer(s)")
+                    if msg_type == "file":
+                        notify("Отправка", "Файлы отправлены")
             time.sleep(0.5)
         except Exception as e:
             log(f"watch_clipboard error: {e}")
@@ -258,12 +262,15 @@ def watch_and_send(conn, stop_event: threading.Event | None = None) -> None:
                     last_clipboard_hash[0] = clipboard_hash
                     if msg_type == "file":
                         log("Detected new files, packing...")
+                        notify("Отправка", "Упаковка и отправка файлов...")
                         paths = data.decode("utf-8").split("\n")
                         send_data = pack_files(paths)
                     else:
                         send_data = data
                     conn.sendall(make_message(msg_type, send_data))
                     log(f"Sent {msg_type}")
+                    if msg_type == "file":
+                        notify("Отправка", "Файлы отправлены")
             time.sleep(0.5)
         except Exception as e:
             log(f"watch_and_send error: {e}")

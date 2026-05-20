@@ -39,6 +39,8 @@ def receive_loop(conn: socket.socket) -> None:
                 buffer = buffer[length:]
                 last_clipboard_hash[0] = hash_data(payload)
                 write_clipboard(msg_type, payload)
+                if msg_type == "file":
+                    notify("Получение", "Файлы получены и распакованы")
                 broadcast(msg_type, payload, exclude=conn)
                 with peers_lock:
                     if len(peers) >= 2:
