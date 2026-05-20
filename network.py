@@ -1,37 +1,47 @@
-import pyperclip
 import psutil
 from zeroconf import ServiceInfo, ServiceBrowser, Zeroconf, NonUniqueNameException
 import socket
 import threading
-from state import log, last_clipboard, broadcast, peers_lock, peers, HANDSHAKE, PORT, update_tray, notify
-from clipboard import watch_clipboard, watch_and_send
+from state import log, broadcast, peers_lock, peers, HANDSHAKE, PORT, update_tray, notify, hash_data, last_clipboard_hash
+from clipboard import watch_clipboard, watch_and_send, write_clipboard
 
 def receive_loop(conn: socket.socket) -> None:
-    buffer = ""
+    buffer = b""
     while True:
         try:
-            data = conn.recv(4096).decode()
+            data = conn.recv(4096)
             if not data:
                 break
             buffer += data
-            while "\n" in buffer:
-                length_str, buffer = buffer.split("\n", 1)
-                length = int(length_str)
-                while len(buffer.encode()) < length:
-                    chunk = conn.recv(4096).decode()
+            while True:
+                if b"\n" not in buffer:
+                    break
+                nl = buffer.index(b"\n")
+                msg_type = buffer[:nl].decode()
+                buffer = buffer[nl + 1:]
+                if b"\n" not in buffer:
+                    chunk = conn.recv(4096)
                     if not chunk:
                         return
                     buffer += chunk
-                text = buffer[:length]
+                nl = buffer.index(b"\n")
+                length = int(buffer[:nl].decode())
+                buffer = buffer[nl + 1:]
+                while len(buffer) < length:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        return
+                    buffer += chunk
+                payload = buffer[:length]
                 buffer = buffer[length:]
-                last_clipboard[0] = text
-                pyperclip.copy(text)
-                broadcast(text, exclude=conn)
+                last_clipboard_hash[0] = hash_data(payload)
+                write_clipboard(msg_type, payload)
+                broadcast(msg_type, payload, exclude=conn)
                 with peers_lock:
                     if len(peers) >= 2:
-                        log("Received & forwarded")
+                        log(f"Received {msg_type} and forwarded")
                     else:
-                        log("Received")
+                        log(f"Received {msg_type}")
         except Exception as e:
             log(f"receive_loop error: {e}")
             break

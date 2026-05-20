@@ -1,11 +1,12 @@
-import pyperclip
 import socket
 import threading
+import hashlib
 from plyer import notification
 
 PORT = 9999
 HANDSHAKE = bytes(b"CLIPSYNV1\n")
 
+last_clipboard_hash: list[str] = [""]
 peers: list[socket.socket] = []
 peers_lock = threading.Lock()
 display_mode:bool = False
@@ -22,20 +23,14 @@ def set_display_mode(val: bool) -> None:
     global display_mode
     display_mode = val
 
-def safe_paste() -> str:
-    try:
-        return pyperclip.paste()
-    except Exception:
-        return ""
+def hash_data(data: bytes) -> str:
+    return hashlib.md5(data).hexdigest()
 
-last_clipboard: list[str] = [safe_paste()]
+def make_message(msg_type: str, data: bytes) -> bytes:
+    return f"{msg_type}\n{len(data)}\n".encode() + data
 
-def make_message(text: str) -> bytes:
-    encoded = text.encode()
-    return f"{len(encoded)}\n".encode() + encoded
-
-def broadcast(text: str, exclude: socket.socket | None = None) -> None:
-    msg = make_message(text)
+def broadcast(msg_type: str, data: bytes, exclude: socket.socket | None = None) -> None:
+    msg = make_message(msg_type, data)
     with peers_lock:
         for peer in peers[:]:
             if peer is exclude:
