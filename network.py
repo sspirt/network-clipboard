@@ -2,7 +2,8 @@ import psutil
 from zeroconf import ServiceInfo, ServiceBrowser, Zeroconf, NonUniqueNameException
 import socket
 import threading
-from state import log, broadcast, peers_lock, peers, HANDSHAKE, PORT, update_tray, notify, hash_data, last_clipboard_hash
+from state import (log, broadcast, peers_lock, peers, HANDSHAKE, PORT,
+                   update_tray, notify, hash_data, last_clipboard_hash, add_to_history)
 from clipboard import watch_clipboard, watch_and_send, write_clipboard
 
 def receive_loop(conn: socket.socket) -> None:
@@ -39,6 +40,7 @@ def receive_loop(conn: socket.socket) -> None:
                 buffer = buffer[length:]
                 last_clipboard_hash[0] = hash_data(payload)
                 write_clipboard(msg_type, payload)
+                add_to_history(msg_type, payload)
                 if msg_type == "file":
                     notify("Получение", "Файлы получены и распакованы")
                 broadcast(msg_type, payload, exclude=conn)

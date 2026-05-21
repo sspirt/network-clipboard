@@ -2,7 +2,9 @@ import os
 import sys
 import pystray
 from PIL import Image, ImageDraw
-from state import set_tray_icon
+from state import (set_tray_icon, clipboard_history, history_lock, hash_data,
+                   last_clipboard_hash, broadcast, log)
+from clipboard import write_clipboard
 
 def has_display() -> bool:
     if sys.platform in ("win32", "darwin"):
@@ -33,7 +35,7 @@ def create_icon_image(status: str = "searching"):
     elif status == "client":
         draw.polygon([
             (cx - 14, cy - 12),
-            (cx + 4,  cy),
+            (cx + 4, cy),
             (cx - 14, cy + 12),
         ], fill="white")
         draw.rectangle([cx - 14, cy - w, cx + 4, cy + w], fill="white")
@@ -43,12 +45,52 @@ def create_icon_image(status: str = "searching"):
     return img
 
 def run_tray(on_quit_callback):
-    menu = pystray.Menu(pystray.MenuItem("Выйти", lambda icon, _ : (on_quit_callback(), icon.stop())))
+    def on_history_click(msg_type: str, data: bytes) -> None:
+        import state
+        state.ignore_clipboard_check.set()
+        try:
+            write_clipboard(msg_type, data)
+            last_clipboard_hash[0] = hash_data(data)
+            broadcast(msg_type, data)
+            log(f"Restored from history: {msg_type}")
+        finally:
+            state.ignore_clipboard_check.clear()
+
+    def clear_history() -> None:
+        with history_lock:
+            clipboard_history.clear()
+        update_menu()
+
+    def make_history_callback(msg_type, data):
+        def callback(icon, item):
+            on_history_click(msg_type, data)
+        return callback
+
+    def build_menu():
+        items = []
+        with history_lock:
+            for item in clipboard_history:
+                cb = make_history_callback(item["type"], item["data"])
+                items.append(pystray.MenuItem(item["preview"], cb))
+        if items:
+            items.append(pystray.Menu.SEPARATOR)
+            items.append(pystray.MenuItem("Очистить историю", lambda icon, x: clear_history()))
+            items.append(pystray.Menu.SEPARATOR)
+        items.append(pystray.MenuItem("Выйти", lambda icon, x: (on_quit_callback(), icon.stop())))
+        return items
+
+    def update_menu():
+        import state
+        if state.tray_icon:
+            state.tray_icon.menu = pystray.Menu(*build_menu())
+
+    import state
+    state.menu_update_callback = update_menu
     icon = pystray.Icon(
         name="Network Clipboard",
         icon=create_icon_image(),
         title="Поиск...",
-        menu=menu
+        menu=pystray.Menu(*build_menu())
     )
     set_tray_icon(icon)
     icon.run()

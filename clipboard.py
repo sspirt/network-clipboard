@@ -6,8 +6,8 @@ import io
 import zipfile
 import tempfile
 from pathlib import Path
-from state import (last_clipboard_hash, broadcast, peers, log, make_message,
-                   hash_data, peers_lock, clipboard_lock, notify)
+from state import (last_clipboard_hash, broadcast, peers, log, make_message, ignore_clipboard_check,
+                   hash_data, peers_lock, clipboard_lock, notify, add_to_history)
 
 temp_dir: Path | None = None
 last_unpacked_paths: set[str] = set()
@@ -227,6 +227,9 @@ def write_linux(msg_type: str, data: bytes) -> None:
 def watch_clipboard() -> None:
     while True:
         try:
+            if ignore_clipboard_check.is_set():
+                time.sleep(0.1)
+                continue
             clipboard_result = read_clipboard()
             if clipboard_result:
                 msg_type, data = clipboard_result
@@ -240,6 +243,7 @@ def watch_clipboard() -> None:
                         send_data = pack_files(paths)
                     else:
                         send_data = data
+                    add_to_history(msg_type, send_data)
                     broadcast(msg_type, send_data)
                     with peers_lock:
                         log(f"Sent {msg_type} to {len(peers)} peer(s)")
@@ -254,6 +258,9 @@ def watch_and_send(conn, stop_event: threading.Event | None = None) -> None:
         if stop_event and stop_event.is_set():
             break
         try:
+            if ignore_clipboard_check.is_set():
+                time.sleep(0.1)
+                continue
             clipboard_result = read_clipboard()
             if clipboard_result:
                 msg_type, data = clipboard_result
@@ -267,6 +274,7 @@ def watch_and_send(conn, stop_event: threading.Event | None = None) -> None:
                         send_data = pack_files(paths)
                     else:
                         send_data = data
+                    add_to_history(msg_type, send_data)
                     conn.sendall(make_message(msg_type, send_data))
                     log(f"Sent {msg_type}")
                     if msg_type == "file":
