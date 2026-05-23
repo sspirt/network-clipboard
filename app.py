@@ -1,9 +1,11 @@
 import threading
 import os
 import time
+import tkinter
+from tkinter import simpledialog
 from network import find_server, run_as_client, run_as_server
 from tray import run_tray, has_display
-from state import log, set_display_mode
+from state import log, set_display_mode, init_crypto
 
 def start_networking() -> None:
     while True:
@@ -21,6 +23,13 @@ def quit_app() -> None:
     os._exit(0)
 
 if __name__ == "__main__":
+    root = tkinter.Tk()
+    root.withdraw()
+    password = simpledialog.askstring("Network Clipboard", "Введите ключ шифрования", show='*')
+    if not password:
+        quit_app()
+    assert password is not None
+    init_crypto(password)
     if has_display():
         set_display_mode(True)
         threading.Thread(target=start_networking, daemon=True).start()

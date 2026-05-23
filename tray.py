@@ -51,7 +51,8 @@ def run_tray(on_quit_callback):
         try:
             write_clipboard(msg_type, data)
             last_clipboard_hash[0] = hash_data(data)
-            broadcast(msg_type, data)
+            encrypted_data = state.cipher.encrypt(data)
+            broadcast(msg_type, encrypted_data)
             log(f"Restored from history: {msg_type}")
         finally:
             state.ignore_clipboard_check.clear()

@@ -2,11 +2,13 @@ import psutil
 from zeroconf import ServiceInfo, ServiceBrowser, Zeroconf, NonUniqueNameException
 import socket
 import threading
+from cryptography.fernet import InvalidToken
 from state import (log, broadcast, peers_lock, peers, HANDSHAKE, PORT,
                    update_tray, notify, hash_data, last_clipboard_hash, add_to_history)
 from clipboard import watch_clipboard, watch_and_send, write_clipboard
 
 def receive_loop(conn: socket.socket) -> None:
+    import state
     buffer = b""
     BUFF_SIZE = 262144
     while True:
@@ -37,10 +39,11 @@ def receive_loop(conn: socket.socket) -> None:
                 if len(buffer) < length:
                     break
                 payload = buffer[:length]
+                decrypted_payload = state.cipher.decrypt(payload)
                 buffer = buffer[length:]
-                last_clipboard_hash[0] = hash_data(payload)
-                write_clipboard(msg_type, payload)
-                add_to_history(msg_type, payload)
+                last_clipboard_hash[0] = hash_data(decrypted_payload)
+                write_clipboard(msg_type, decrypted_payload)
+                add_to_history(msg_type, decrypted_payload)
                 if msg_type == "file":
                     notify("Получение", "Файлы получены и распакованы")
                 broadcast(msg_type, payload, exclude=conn)
@@ -49,6 +52,9 @@ def receive_loop(conn: socket.socket) -> None:
                         log(f"Received {msg_type} and forwarded")
                     else:
                         log(f"Received {msg_type}")
+        except InvalidToken:
+            log("Invalid ciphering token")
+            notify("Ошибка безопасности", "Неверный ключ шифрования сети")
         except Exception as e:
             log(f"receive_loop error: {e}")
             break

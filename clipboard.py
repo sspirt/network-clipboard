@@ -225,6 +225,7 @@ def write_linux(msg_type: str, data: bytes) -> None:
         subprocess.run(["xclip", "-selection", "clipboard"], input=data, capture_output=True)
 
 def watch_clipboard() -> None:
+    import state
     while True:
         try:
             if ignore_clipboard_check.is_set():
@@ -244,7 +245,8 @@ def watch_clipboard() -> None:
                     else:
                         send_data = data
                     add_to_history(msg_type, send_data)
-                    broadcast(msg_type, send_data)
+                    encrypted_data = state.cipher.encrypt(send_data)
+                    broadcast(msg_type, encrypted_data)
                     with peers_lock:
                         log(f"Sent {msg_type} to {len(peers)} peer(s)")
                     if msg_type == "file":
@@ -254,6 +256,7 @@ def watch_clipboard() -> None:
             log(f"watch_clipboard error: {e}")
 
 def watch_and_send(conn, stop_event: threading.Event | None = None) -> None:
+    import state
     while True:
         if stop_event and stop_event.is_set():
             break
@@ -275,7 +278,8 @@ def watch_and_send(conn, stop_event: threading.Event | None = None) -> None:
                     else:
                         send_data = data
                     add_to_history(msg_type, send_data)
-                    conn.sendall(make_message(msg_type, send_data))
+                    encrypted_data = state.cipher.encrypt(send_data)
+                    conn.sendall(make_message(msg_type, encrypted_data))
                     log(f"Sent {msg_type}")
                     if msg_type == "file":
                         notify("Отправка", "Файлы отправлены")

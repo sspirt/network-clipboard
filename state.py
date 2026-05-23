@@ -3,6 +3,8 @@ import threading
 import hashlib
 import zipfile
 import io
+import base64
+from cryptography.fernet import Fernet
 from typing import TypedDict
 from plyer import notification
 
@@ -18,6 +20,7 @@ tray_icon = None
 history_lock = threading.Lock()
 ignore_clipboard_check = threading.Event()
 menu_update_callback = None
+cipher: Fernet
 
 class HistoryItem(TypedDict):
     type: str
@@ -104,3 +107,9 @@ def add_to_history(msg_type: str, data: bytes) -> None:
             menu_update_callback()
         except Exception as e:
             log(f"Tray updating error: {e}")
+
+def init_crypto(password: str) -> None:
+    global cipher
+    key = hashlib.sha256(password.encode()).digest()
+    fernet_key = base64.urlsafe_b64encode(key)
+    cipher = Fernet(fernet_key)
