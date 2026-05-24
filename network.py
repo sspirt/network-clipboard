@@ -3,7 +3,7 @@ from zeroconf import ServiceInfo, ServiceBrowser, Zeroconf, NonUniqueNameExcepti
 import socket
 import threading
 from cryptography.fernet import InvalidToken
-from state import (log, broadcast, peers_lock, peers, HANDSHAKE, PORT,
+from state import (log, broadcast, peers_lock, peers, HANDSHAKE, PORT, server_socket,
                    update_tray, notify, hash_data, last_clipboard_hash, add_to_history)
 from clipboard import watch_clipboard, watch_and_send, write_clipboard
 
@@ -13,7 +13,10 @@ def receive_loop(conn: socket.socket) -> None:
     BUFF_SIZE = 262144
     while True:
         try:
-            data = conn.recv(BUFF_SIZE)
+            try:
+                data = conn.recv(BUFF_SIZE)
+            except (OSError, ConnectionResetError, ConnectionAbortedError):
+                break
             if not data:
                 break
             buffer += data
@@ -117,10 +120,14 @@ def run_as_server() -> None:
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     server.bind(("0.0.0.0", PORT))
     server.listen(10)
+    server_socket.append(server)
     log(f"Listening on 0.0.0.0:{PORT}")
     threading.Thread(target=watch_clipboard, daemon=True).start()
     while True:
-        conn, addr = server.accept()
+        try:
+            conn, addr = server.accept()
+        except OSError:
+            break
         threading.Thread(target=handle_incoming, args=(conn, addr), daemon=True).start()
 
 def run_as_client(ip: str) -> None:

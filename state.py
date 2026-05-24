@@ -15,6 +15,7 @@ HANDSHAKE = bytes(b"CLIPSYNV1\n")
 
 last_clipboard_hash: list[str] = [""]
 peers: list[socket.socket] = []
+server_socket: list[socket.socket] = []
 peers_lock = threading.Lock()
 clipboard_lock = threading.Lock()
 display_mode: bool = False
@@ -126,3 +127,21 @@ def init_crypto(password: str) -> None:
     key = hashlib.sha256(password.encode()).digest()
     fernet_key = base64.urlsafe_b64encode(key)
     cipher = Fernet(fernet_key)
+
+def close_all_connections() -> None:
+    log("Closing all connections...")
+    with peers_lock:
+        if peers:
+            for peer in peers:
+                try:
+                    peer.shutdown(socket.SHUT_RDWR)
+                    peer.close()
+                except Exception:
+                    pass
+            peers.clear()
+    if server_socket:
+        try:
+            server_socket[0].close()
+        except Exception:
+            pass
+        server_socket.clear()
