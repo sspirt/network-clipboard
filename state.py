@@ -4,6 +4,8 @@ import hashlib
 import zipfile
 import io
 import base64
+import sys
+import os
 from cryptography.fernet import Fernet
 from typing import TypedDict
 from plyer import notification
@@ -65,13 +67,24 @@ def update_tray(status: str, tooltip: str) -> None:
     tray_icon.title = tooltip
 
 def notify(title: str, message: str) -> None:
+    base_path = sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+    icon_path = os.path.join(base_path, "icons/icon.ico")
     try:
-        notification.notify(
-            title=title,
-            message=message,
-            app_name="Network Clipboard",
-            timeout=4,
-        )
+        if os.name == 'nt' and os.path.exists(icon_path):
+            notification.notify(
+                title=title,
+                message=message,
+                app_name="Network Clipboard",
+                app_icon=icon_path,
+                timeout=3
+            )
+        else:
+            notification.notify(
+                title=title,
+                message=message,
+                app_name="Network Clipboard",
+                timeout=3,
+            )
     except Exception:
         pass
 
